@@ -687,3 +687,214 @@ with pd.ExcelWriter("/content/salmon_publication_results_full.xlsx") as writer:
 
 print("Saved: /content/salmon_publication_results_full.xlsx")
 print(final_results_df.round(4).to_string(index=False))
+
+# Cell 22A: Robust Google Drive mount
+
+from google.colab import drive
+from pathlib import Path
+import shutil, os
+
+# First try normal mount
+try:
+    drive.mount('/content/drive', force_remount=True)
+except Exception as e:
+    print("Normal mount failed:", e)
+    print("Trying Drive flush and remount...")
+
+    try:
+        drive.flush_and_unmount()
+    except:
+        pass
+
+    drive.mount('/content/drive', force_remount=True)
+
+SAVE_ROOT = Path("/content/drive/MyDrive/technicalwriting/Salmon_fish_disease_classification")
+
+MODEL_DIR = SAVE_ROOT / "best_models"
+TABLE_DIR = SAVE_ROOT / "result_tables"
+IMAGE_DIR = SAVE_ROOT / "image_results"
+
+MODEL_DIR.mkdir(parents=True, exist_ok=True)
+TABLE_DIR.mkdir(parents=True, exist_ok=True)
+IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+
+print("Saving to:", SAVE_ROOT)
+
+# Save best PyTorch model weights
+
+for model_name in trained_models.keys():
+    src = Path(f"/content/best_{model_name}.pt")
+    dst = MODEL_DIR / f"best_{model_name}.pt"
+
+    if src.exists():
+        shutil.copy2(src, dst)
+        print("Saved model:", dst)
+    else:
+        print("Model not found:", src)
+
+# Save YOLO26 best model if available
+
+yolo_best_src = Path("/content/yolo26_salmon/yolo26n_cls_salmon/weights/best.pt")
+yolo_last_src = Path("/content/yolo26_salmon/yolo26n_cls_salmon/weights/last.pt")
+
+if yolo_best_src.exists():
+    shutil.copy2(yolo_best_src, MODEL_DIR / "best_yolo26n_cls_salmon.pt")
+    print("Saved YOLO best model.")
+
+if yolo_last_src.exists():
+    shutil.copy2(yolo_last_src, MODEL_DIR / "last_yolo26n_cls_salmon.pt")
+    print("Saved YOLO last model.")
+
+# Save all CSV and Excel result tables
+
+csv_files = list(Path("/content").glob("*.csv"))
+excel_files = list(Path("/content").glob("*.xlsx"))
+
+for f in csv_files + excel_files:
+    shutil.copy2(f, TABLE_DIR / f.name)
+    print("Saved table:", TABLE_DIR / f.name)
+
+# Also save final dataframes again safely
+dist_df.to_csv(TABLE_DIR / "dataset_distribution.csv", index=False)
+results_df.to_csv(TABLE_DIR / "model_test_metrics.csv", index=False)
+bench_df.to_csv(TABLE_DIR / "inference_benchmark.csv", index=False)
+
+with pd.ExcelWriter(TABLE_DIR / "salmon_publication_results_full.xlsx") as writer:
+    dist_df.to_excel(writer, sheet_name="Dataset_Distribution", index=False)
+    results_df.to_excel(writer, sheet_name="Model_Test_Metrics", index=False)
+    bench_df.to_excel(writer, sheet_name="Inference_Benchmark", index=False)
+
+print("All result tables saved.")
+
+# Save training curves as images
+
+for model_name, hist in all_histories.items():
+
+    plt.figure(figsize=(7,4))
+    plt.plot(hist["epoch"], hist["train_loss"], marker="o", label="Train Loss")
+    plt.plot(hist["epoch"], hist["val_loss"], marker="o", label="Validation Loss")
+    plt.title(f"{model_name}: Loss Curve")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(IMAGE_DIR / f"{model_name}_loss_curve.png", dpi=300)
+    plt.close()
+
+    plt.figure(figsize=(7,4))
+    plt.plot(hist["epoch"], hist["train_acc"], marker="o", label="Train Accuracy")
+    plt.plot(hist["epoch"], hist["val_acc"], marker="o", label="Validation Accuracy")
+    plt.title(f"{model_name}: Accuracy Curve")
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(IMAGE_DIR / f"{model_name}_accuracy_curve.png", dpi=300)
+    plt.close()
+
+print("Training curves saved.")
+
+# Save confusion matrices
+
+for model_name, item in pred_store.items():
+    cm = confusion_matrix(item["y_true"], item["y_pred"])
+
+    plt.figure(figsize=(5,4))
+    sns.heatmap(
+        cm,
+        annot=True,
+        fmt="d",
+        cmap="Blues",
+        xticklabels=class_names,
+        yticklabels=class_names
+    )
+    plt.title(f"{model_name}: Confusion Matrix")
+    plt.xlabel("Predicted")
+    plt.ylabel("True")
+    plt.tight_layout()
+    plt.savefig(IMAGE_DIR / f"{model_name}_confusion_matrix.png", dpi=300)
+    plt.close()
+
+print("Confusion matrices saved.")
+
+# Save ROC and PR curves
+
+from sklearn.metrics import roc_curve, precision_recall_curve, auc, average_precision_score
+
+for model_name, item in pred_store.items():
+    y_true = item["y_true"]
+    y_prob = item["y_prob"]
+
+    fpr, tpr, _ = roc_curve(y_true, y_prob)
+    precision, recall, _ = precision_recall_curve(y_true, y_prob)
+
+    plt.figure(figsize=(6,5))
+    plt.plot(fpr, tpr, label=f"AUC = {auc(fpr, tpr):.4f}")
+    plt.plot([0,1], [0,1], linestyle="--")
+    plt.title(f"{model_name}: ROC Curve")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(IMAGE_DIR / f"{model_name}_roc_curve.png", dpi=300)
+    plt.close()
+
+    plt.figure(figsize=(6,5))
+    plt.plot(recall, precision, label=f"AP = {average_precision_score(y_true, y_prob):.4f}")
+    plt.title(f"{model_name}: Precision-Recall Curve")
+    plt.xlabel("Recall")
+    plt.ylabel("Precision")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(IMAGE_DIR / f"{model_name}_precision_recall_curve.png", dpi=300)
+    plt.close()
+
+print("ROC and PR curves saved.")
+
+# Save dataset distribution figure
+
+plt.figure(figsize=(7,4))
+sns.barplot(data=dist_df, x="Split", y="Count", hue="Class")
+plt.title("SalmonScan Train/Validation/Test Distribution")
+plt.tight_layout()
+plt.savefig(IMAGE_DIR / "dataset_distribution.png", dpi=300)
+plt.close()
+
+print("Dataset distribution figure saved.")
+
+# Save YOLO training outputs if available
+
+YOLO_RUN_DIR = Path("/content/yolo26_salmon/yolo26n_cls_salmon")
+
+if YOLO_RUN_DIR.exists():
+    YOLO_SAVE_DIR = IMAGE_DIR / "yolo26_training_outputs"
+    YOLO_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+
+    for f in YOLO_RUN_DIR.rglob("*"):
+        if f.is_file() and f.suffix.lower() in [".png", ".jpg", ".jpeg", ".csv"]:
+            target = YOLO_SAVE_DIR / f.name
+            shutil.copy2(f, target)
+
+    print("YOLO result images/tables saved.")
+else:
+    print("YOLO run folder not found.")
+
+# Final confirmation
+
+print("\nSaved successfully.")
+print("Best models:", MODEL_DIR)
+print("Result tables:", TABLE_DIR)
+print("Image results:", IMAGE_DIR)
+
+print("\nFiles in best_models:")
+print(list(MODEL_DIR.glob("*")))
+
+print("\nFiles in result_tables:")
+print(list(TABLE_DIR.glob("*")))
+
+print("\nFiles in image_results:")
+print(list(IMAGE_DIR.glob("*"))[:20])
