@@ -248,6 +248,13 @@ Salmon_fish_disease_classification/
 
 The objective of this repository is to provide a reproducible deep learning workflow for classifying salmon fish images into healthy and infected categories using modern computer vision models.
 
+
+## Revision of Code
+
+The **Salmon_Fish_Disease_New.ipynb** file contains newly revised codes.
+
+
+
 ## Citation
 
 If you use the dataset, please cite:
